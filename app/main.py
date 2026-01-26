@@ -1,8 +1,7 @@
 from fastapi import FastAPI
-from app.api.endpoints import telegram, intent
+from app.api.endpoints import telegram
 
-app = FastAPI(title="Brain SaaS API", version="0.1.0")
-
+app = FastAPI(title="Brain SaaS API", version="0.1.0"
 @app.get("/")
 async def root():
     return {"message": "Brain SaaS API is online 🧬"}
