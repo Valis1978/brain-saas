@@ -55,16 +55,22 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                 title=title,
                 date=date,
                 time=time,
-                description=description
+                description=description,
+                user_id=user_id  # Pass user_id for dual calendar support
             )
             
             if result.get("success"):
+                emoji = result.get("calendar_emoji", "📅")
+                calendar_name = result.get("calendar_name", "Kalendář")
+                category = result.get("category", "work")
+                category_label = "Práce" if category == "work" else "Osobní"
+                
                 async with httpx.AsyncClient() as client:
                     await client.post(
                         f"https://api.telegram.org/bot{token}/sendMessage",
                         json={
                             "chat_id": chat_id,
-                            "text": f"📅 Událost přidána do Google Kalendáře!\n\n**{title}**\n🔗 {result.get('html_link', '')}"[:4000],
+                            "text": f"{emoji} Přidáno do kalendáře **{category_label}**!\n\n**{title}**\n🔗 {result.get('html_link', '')}"[:4000],
                             "parse_mode": "Markdown"
                         }
                     )
