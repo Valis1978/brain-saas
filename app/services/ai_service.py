@@ -28,11 +28,30 @@ class AIService:
         if not self.client:
             return {"error": "API key missing"}
 
-        # Get current date dynamically
-        current_date = datetime.now().strftime("%Y-%m-%d")
+        # Get current date dynamically with weekday info
+        now = datetime.now()
+        current_date = now.strftime("%Y-%m-%d")
+        weekday_names = ["pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota", "neděle"]
+        current_weekday = weekday_names[now.weekday()]
         
         system_prompt = f"""
         Jsi inteligentní osobní asistent "Vlastikův druhý mozek". Analyzuj text a extrahuj záměr.
+        
+        DNEŠNÍ KONTEXT:
+        - Dnes je {current_weekday} {current_date}
+        - Den v týdnu: {current_weekday} (index {now.weekday()}, kde 0=pondělí)
+        
+        PRAVIDLA PRO PARSOVÁNÍ DATA:
+        - "tuto [den]" nebo "[den]" = nejbližší výskyt toho dne V TOMTO TÝDNU
+        - "příští [den]" = tento den ALE V PŘÍŠTÍM TÝDNU (min +7 dní od začátku příštího týdne)
+        - Pokud někdo řekne "příští středa" a dnes je pondělí 27.1., pak příští středa = 5.2. (NE 29.1.!)
+        - "za týden" = dnes + 7 dní
+        - "za měsíc" = dnes + 30 dní
+        
+        PŘÍKLADY (pokud dnes je pondělí 27.1.2026):
+        - "středa" nebo "ve středu" = 29.1.2026 (tato středa)
+        - "příští středa" = 5.2.2026 (středa příštího týdne)
+        - "příští pondělí" = 3.2.2026 (pondělí příštího týdne)
         
         Vrať odpověď POUZE jako JSON v tomto formátu:
         {{
