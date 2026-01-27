@@ -611,6 +611,71 @@ class GoogleService:
             
         except Exception as e:
             return {"success": False, "error": str(e)}
+    
+    async def move_event_to_calendar(
+        self,
+        token_data: dict,
+        user_id: str,
+        event_id: str,
+        source_calendar_id: str,
+        target_calendar_type: str  # 'work' or 'personal'
+    ) -> dict:
+        """
+        Move an event from one calendar to another (e.g., from Personal to Work).
+        This creates a copy in the target calendar and deletes from source.
+        """
+        try:
+            credentials = self.get_credentials_from_tokens(token_data)
+            service = build('calendar', 'v3', credentials=credentials)
+            
+            # Get calendar IDs
+            calendar_ids = self.get_or_create_calendars(token_data, user_id)
+            target_calendar_id = calendar_ids.get(target_calendar_type)
+            
+            if not target_calendar_id:
+                return {"success": False, "error": f"Kalendář '{target_calendar_type}' nenalezen"}
+            
+            # Check if already in target calendar
+            if source_calendar_id == target_calendar_id:
+                return {
+                    "success": False, 
+                    "error": f"Událost už je v kalendáři {'Práce' if target_calendar_type == 'work' else 'Osobní'}"
+                }
+            
+            # Get the event from source calendar
+            event = service.events().get(calendarId=source_calendar_id, eventId=event_id).execute()
+            title = event.get('summary', 'Událost')
+            
+            # Remove ID and other metadata that shouldn't be copied
+            event.pop('id', None)
+            event.pop('iCalUID', None)
+            event.pop('etag', None)
+            event.pop('htmlLink', None)
+            event.pop('created', None)
+            event.pop('updated', None)
+            event.pop('creator', None)
+            event.pop('organizer', None)
+            
+            # Create event in target calendar
+            new_event = service.events().insert(calendarId=target_calendar_id, body=event).execute()
+            
+            # Delete from source calendar
+            service.events().delete(calendarId=source_calendar_id, eventId=event_id).execute()
+            
+            target_name = CALENDAR_NAMES.get(target_calendar_type, target_calendar_type)
+            
+            return {
+                "success": True,
+                "event_id": new_event.get('id'),
+                "title": title,
+                "target_calendar": target_calendar_type,
+                "target_calendar_name": target_name,
+                "html_link": new_event.get('htmlLink')
+            }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 # Singleton instance
 google_service = GoogleService()
+

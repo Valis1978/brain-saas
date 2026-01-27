@@ -50,6 +50,7 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
     target_event = intent_data.get("target_event")
     new_date = intent_data.get("new_date")
     new_time = intent_data.get("new_time")
+    target_calendar = intent_data.get("target_calendar")  # For moving between calendars
     
     result = None
     
@@ -180,32 +181,61 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                     # Found exactly one, update it
                     event = events[0]
                     
-                    # Calculate new_date if "tomorrow" was mentioned
-                    from datetime import datetime, timedelta
-                    if not new_date and "zítra" in str(intent_data).lower():
-                        new_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-                    
-                    update_result = await google_service.update_event(
-                        token_data=tokens,
-                        user_id=user_id,
-                        event_id=event["id"],
-                        calendar_id=event["calendar_id"],
-                        new_date=new_date,
-                        new_time=new_time
-                    )
-                    
-                    if update_result.get("success"):
-                        msg = f"✅ Událost **{event['title']}** přesunuta!"
-                        if new_date:
-                            msg += f"\n📅 Nové datum: {new_date}"
-                        if new_time:
-                            msg += f"\n⏰ Nový čas: {new_time}"
+                    # Check if this is a calendar move request
+                    if target_calendar:
+                        move_result = await google_service.move_event_to_calendar(
+                            token_data=tokens,
+                            user_id=user_id,
+                            event_id=event["id"],
+                            source_calendar_id=event["calendar_id"],
+                            target_calendar_type=target_calendar
+                        )
                         
-                        async with httpx.AsyncClient() as client:
-                            await client.post(
-                                f"https://api.telegram.org/bot{token}/sendMessage",
-                                json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
-                            )
+                        if move_result.get("success"):
+                            target_name = move_result.get("target_calendar_name", target_calendar)
+                            emoji = "💼" if target_calendar == "work" else "🏠"
+                            msg = f"{emoji} Událost **{event['title']}** přesunuta do kalendáře **{target_name}**!"
+                            
+                            async with httpx.AsyncClient() as client:
+                                await client.post(
+                                    f"https://api.telegram.org/bot{token}/sendMessage",
+                                    json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
+                                )
+                        else:
+                            error_msg = move_result.get("error", "Neznámá chyba")
+                            async with httpx.AsyncClient() as client:
+                                await client.post(
+                                    f"https://api.telegram.org/bot{token}/sendMessage",
+                                    json={"chat_id": chat_id, "text": f"❌ {error_msg}"}
+                                )
+                    else:
+                        # This is a date/time update
+                        # Calculate new_date if "tomorrow" was mentioned
+                        from datetime import datetime, timedelta
+                        if not new_date and "zítra" in str(intent_data).lower():
+                            new_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                        
+                        update_result = await google_service.update_event(
+                            token_data=tokens,
+                            user_id=user_id,
+                            event_id=event["id"],
+                            calendar_id=event["calendar_id"],
+                            new_date=new_date,
+                            new_time=new_time
+                        )
+                        
+                        if update_result.get("success"):
+                            msg = f"✅ Událost **{event['title']}** přesunuta!"
+                            if new_date:
+                                msg += f"\n📅 Nové datum: {new_date}"
+                            if new_time:
+                                msg += f"\n⏰ Nový čas: {new_time}"
+                            
+                            async with httpx.AsyncClient() as client:
+                                await client.post(
+                                    f"https://api.telegram.org/bot{token}/sendMessage",
+                                    json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
+                                )
                 else:
                     # Multiple events found, ask for clarification
                     event_list = "\n".join([f"• {e['title']} ({e['start'][:10]})" for e in events[:5]])
