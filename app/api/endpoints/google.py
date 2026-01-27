@@ -304,7 +304,7 @@ async def get_events(
         raise HTTPException(status_code=401, detail="User not authenticated with Google")
     
     try:
-        result = google_service.get_events(tokens, user_id, query_type)
+        result = await google_service.get_events(tokens, user_id, query_type)
         return {"events": result.get("events", []), "success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -324,7 +324,7 @@ async def update_event(
         raise HTTPException(status_code=401, detail="User not authenticated with Google")
     
     try:
-        result = google_service.update_event(tokens, user_id, event_id, calendar_id, new_date, new_time)
+        result = await google_service.update_event(tokens, user_id, event_id, calendar_id, new_date, new_time)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -342,7 +342,7 @@ async def delete_event(
         raise HTTPException(status_code=401, detail="User not authenticated with Google")
     
     try:
-        result = google_service.delete_event(tokens, event_id, calendar_id)
+        result = await google_service.delete_event(tokens, event_id, calendar_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -361,7 +361,7 @@ async def move_event(
         raise HTTPException(status_code=401, detail="User not authenticated with Google")
     
     try:
-        result = google_service.move_event_to_calendar(tokens, user_id, event_id, source_calendar_id, target_calendar_type)
+        result = await google_service.move_event_to_calendar(tokens, user_id, event_id, source_calendar_id, target_calendar_type)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
