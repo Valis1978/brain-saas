@@ -212,6 +212,69 @@ async def get_tasks(user_id: str = Query(..., description="Telegram user ID")):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+from pydantic import BaseModel
+from typing import Optional
+
+class CreateTaskRequest(BaseModel):
+    title: str
+    notes: Optional[str] = None
+    due_date: Optional[str] = None  # YYYY-MM-DD
+
+class CreateEventRequest(BaseModel):
+    title: str
+    date: str  # YYYY-MM-DD
+    time: Optional[str] = None  # HH:MM
+    description: Optional[str] = None
+    category: Optional[str] = None  # 'work', 'personal', or None for auto
+
+
+@router.post("/tasks")
+async def create_task(
+    request: CreateTaskRequest,
+    user_id: str = Query(..., description="Telegram user ID")
+):
+    """Create a new task."""
+    tokens = get_user_tokens(user_id)
+    if not tokens:
+        raise HTTPException(status_code=401, detail="User not authenticated with Google")
+    
+    try:
+        result = await google_service.create_task(
+            tokens, 
+            title=request.title, 
+            notes=request.notes, 
+            due_date=request.due_date
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/events")
+async def create_event(
+    request: CreateEventRequest,
+    user_id: str = Query(..., description="Telegram user ID")
+):
+    """Create a new calendar event."""
+    tokens = get_user_tokens(user_id)
+    if not tokens:
+        raise HTTPException(status_code=401, detail="User not authenticated with Google")
+    
+    try:
+        result = await google_service.create_calendar_event(
+            token_data=tokens,
+            title=request.title,
+            date=request.date,
+            time=request.time,
+            description=request.description,
+            user_id=user_id,
+            category=request.category
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/tasks/{task_id}/complete")
 async def complete_task(task_id: str, user_id: str = Query(..., description="Telegram user ID")):
     """Mark a task as completed."""
