@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api.endpoints import telegram
+from app.api.endpoints import telegram, google
 
 app = FastAPI(title="Brain SaaS API", version="0.1.0")
 
@@ -13,3 +13,4 @@ async def health():
 
 # Include routers
 app.include_router(telegram.router, prefix="/api/v1/telegram", tags=["telegram"])
+app.include_router(google.router)

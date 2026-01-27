@@ -1,0 +1,173 @@
+"""
+Google OAuth API Endpoints
+Handles authentication flow and token management
+"""
+
+import os
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse, HTMLResponse
+from sqlalchemy import text
+from app.services.google_service import google_service
+from app.db.session import SessionLocal
+
+router = APIRouter(prefix="/api/v1/google", tags=["google"])
+
+
+@router.get("/auth")
+async def initiate_google_auth(user_id: str = Query(..., description="Telegram user ID")):
+    """Initiate Google OAuth flow for a user."""
+    try:
+        authorization_url = google_service.get_authorization_url(user_id)
+        return RedirectResponse(url=authorization_url)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to initiate OAuth: {str(e)}")
+
+
+@router.get("/callback")
+async def google_oauth_callback(
+    code: str = Query(None),
+    state: str = Query(None),  # Contains user_id
+    error: str = Query(None)
+):
+    """Handle OAuth callback from Google."""
+    
+    if error:
+        return HTMLResponse(content=f"""
+        <html>
+            <head><title>Brain SaaS - Chyba</title></head>
+            <body style="font-family: system-ui; padding: 40px; text-align: center;">
+                <h1>❌ Autorizace selhala</h1>
+                <p>Chyba: {error}</p>
+                <p>Zkuste to prosím znovu.</p>
+            </body>
+        </html>
+        """, status_code=400)
+    
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code or state parameter")
+    
+    user_id = state
+    
+    try:
+        # Exchange code for tokens
+        tokens = google_service.exchange_code_for_tokens(code)
+        
+        # Store tokens in database
+        db = SessionLocal()
+        try:
+            # Check if user already has tokens
+            existing = db.execute(
+                text("SELECT id FROM google_tokens WHERE user_id = :user_id"),
+                {"user_id": user_id}
+            ).fetchone()
+            
+            if existing:
+                # Update existing tokens
+                db.execute(
+                    text("""
+                        UPDATE google_tokens 
+                        SET access_token = :access_token, 
+                            refresh_token = :refresh_token,
+                            expires_at = :expires_at,
+                            updated_at = NOW()
+                        WHERE user_id = :user_id
+                    """),
+                    {
+                        "user_id": user_id,
+                        "access_token": tokens["access_token"],
+                        "refresh_token": tokens["refresh_token"],
+                        "expires_at": tokens.get("expires_at")
+                    }
+                )
+            else:
+                # Insert new tokens
+                db.execute(
+                    text("""
+                        INSERT INTO google_tokens (user_id, access_token, refresh_token, expires_at)
+                        VALUES (:user_id, :access_token, :refresh_token, :expires_at)
+                    """),
+                    {
+                        "user_id": user_id,
+                        "access_token": tokens["access_token"],
+                        "refresh_token": tokens["refresh_token"],
+                        "expires_at": tokens.get("expires_at")
+                    }
+                )
+            
+            db.commit()
+        finally:
+            db.close()
+        
+        return HTMLResponse(content=f"""
+        <html>
+            <head>
+                <title>Brain SaaS - Úspěch</title>
+                <style>
+                    body {{
+                        font-family: system-ui, -apple-system, sans-serif;
+                        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                        color: white;
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin: 0;
+                    }}
+                    .card {{
+                        background: rgba(255,255,255,0.1);
+                        backdrop-filter: blur(10px);
+                        border-radius: 24px;
+                        padding: 60px;
+                        text-align: center;
+                        border: 1px solid rgba(255,255,255,0.1);
+                    }}
+                    .icon {{ font-size: 80px; margin-bottom: 20px; }}
+                    h1 {{ margin: 0 0 16px 0; }}
+                    p {{ color: rgba(255,255,255,0.7); margin: 0; }}
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <div class="icon">🧠✨</div>
+                    <h1>Google účet propojen!</h1>
+                    <p>Nyní můžete používat Brain SaaS s Google Calendar a Tasks.</p>
+                    <p style="margin-top: 20px; font-size: 14px;">Můžete toto okno zavřít.</p>
+                </div>
+            </body>
+        </html>
+        """)
+        
+    except Exception as e:
+        print(f"OAuth callback error: {e}")
+        return HTMLResponse(content=f"""
+        <html>
+            <head><title>Brain SaaS - Chyba</title></head>
+            <body style="font-family: system-ui; padding: 40px; text-align: center; background: #1a1a2e; color: white;">
+                <h1>❌ Něco se pokazilo</h1>
+                <p>{str(e)}</p>
+            </body>
+        </html>
+        """, status_code=500)
+
+
+@router.get("/status")
+async def check_google_status(user_id: str = Query(..., description="Telegram user ID")):
+    """Check if a user has connected their Google account."""
+    db = SessionLocal()
+    try:
+        result = db.execute(
+            text("SELECT id, expires_at FROM google_tokens WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()
+        
+        if result:
+            return {
+                "connected": True,
+                "expires_at": result.expires_at.isoformat() if result.expires_at else None
+            }
+        else:
+            return {"connected": False}
+    finally:
+        db.close()
