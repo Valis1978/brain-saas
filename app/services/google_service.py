@@ -6,6 +6,7 @@ Supports dual calendars: Work (Práce) and Personal (Osobní)
 
 import os
 import json
+import unicodedata
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 from google.oauth2.credentials import Credentials
@@ -13,6 +14,15 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import httpx
+
+
+def normalize_text(text: str) -> str:
+    """Remove diacritics and convert to lowercase for fuzzy matching."""
+    # Normalize to NFD (decomposed form), remove combining marks, then lowercase
+    normalized = unicodedata.normalize('NFD', text)
+    without_diacritics = ''.join(c for c in normalized if unicodedata.category(c) != 'Mn')
+    return without_diacritics.lower()
+
 
 # Google OAuth Scopes
 SCOPES = [
@@ -456,7 +466,7 @@ class GoogleService:
             end = now + timedelta(days=30)
             
             matching_events = []
-            search_lower = search_query.lower()
+            search_normalized = normalize_text(search_query)
             
             for cal_type, cal_id in calendars.items():
                 events_result = service.events().list(
@@ -468,8 +478,10 @@ class GoogleService:
                 ).execute()
                 
                 for event in events_result.get('items', []):
-                    summary = event.get('summary', '').lower()
-                    if search_lower in summary:
+                    summary = event.get('summary', '')
+                    summary_normalized = normalize_text(summary)
+                    # Fuzzy match: "janik" matches "Janík", "schuzka" matches "schůzka"
+                    if search_normalized in summary_normalized:
                         start_dt = event.get('start', {}).get('dateTime', event.get('start', {}).get('date', ''))
                         matching_events.append({
                             'id': event.get('id'),
