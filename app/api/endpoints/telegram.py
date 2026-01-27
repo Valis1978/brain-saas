@@ -46,10 +46,15 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
     time = intent_data.get("time")
     description = intent_data.get("description")
     category = intent_data.get("category")  # AI-detected category (work/personal)
+    query_type = intent_data.get("query_type", "today")
+    target_event = intent_data.get("target_event")
+    new_date = intent_data.get("new_date")
+    new_time = intent_data.get("new_time")
     
     result = None
     
     try:
+        # ==================== CREATE INTENTS ====================
         if intent == "EVENT" and date:
             result = await google_service.create_calendar_event(
                 token_data=tokens,
@@ -58,14 +63,12 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                 time=time,
                 description=description,
                 user_id=user_id,
-                category=category  # Pass AI-detected category
+                category=category
             )
             
             if result.get("success"):
                 emoji = result.get("calendar_emoji", "📅")
-                calendar_name = result.get("calendar_name", "Kalendář")
-                category = result.get("category", "work")
-                category_label = "Práce" if category == "work" else "Osobní"
+                category_label = "Práce" if result.get("category") == "work" else "Osobní"
                 
                 async with httpx.AsyncClient() as client:
                     await client.post(
@@ -95,10 +98,218 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                             "parse_mode": "Markdown"
                         }
                     )
+        
+        # ==================== QUERY INTENTS ====================
+        elif intent == "QUERY_CALENDAR":
+            result = await google_service.get_events(
+                token_data=tokens,
+                user_id=user_id,
+                query_type=query_type,
+                specific_date=date
+            )
+            
+            if result.get("success"):
+                events = result.get("events", [])
+                if events:
+                    # Format events nicely
+                    label = {
+                        "today": "📅 Dnešek",
+                        "tomorrow": "📅 Zítřek", 
+                        "week": "📅 Tento týden"
+                    }.get(query_type, "📅 Události")
+                    
+                    event_list = []
+                    for e in events:
+                        time_str = ""
+                        if "T" in e["start"]:
+                            time_str = e["start"].split("T")[1][:5] + " - "
+                        event_list.append(f"{e['emoji']} {time_str}**{e['title']}**")
+                    
+                    msg = f"{label}:\n\n" + "\n".join(event_list)
+                else:
+                    msg = "📅 Nemáš žádné nadcházející události."
+                
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": chat_id, "text": msg[:4000], "parse_mode": "Markdown"}
+                    )
+        
+        elif intent == "QUERY_TASKS":
+            result = await google_service.get_pending_tasks(token_data=tokens)
+            
+            if result.get("success"):
+                tasks = result.get("tasks", [])
+                overdue = result.get("overdue_count", 0)
+                
+                if tasks:
+                    task_list = []
+                    for t in tasks:
+                        prefix = "⚠️" if t["is_overdue"] else "☐"
+                        due_str = f" (do {t['due']})" if t["due"] else ""
+                        task_list.append(f"{prefix} **{t['title']}**{due_str}")
+                    
+                    header = f"📋 Úkoly ({len(tasks)}"
+                    if overdue > 0:
+                        header += f", ⚠️ {overdue} prošlých"
+                    header += "):\n\n"
+                    
+                    msg = header + "\n".join(task_list)
+                else:
+                    msg = "✅ Nemáš žádné nesplněné úkoly!"
+                
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": chat_id, "text": msg[:4000], "parse_mode": "Markdown"}
+                    )
+        
+        # ==================== UPDATE/DELETE INTENTS ====================
+        elif intent == "UPDATE_EVENT" and target_event:
+            # First search for the event
+            search_result = await google_service.search_event(
+                token_data=tokens,
+                user_id=user_id,
+                search_query=target_event
+            )
+            
+            if search_result.get("success") and search_result.get("events"):
+                events = search_result["events"]
+                
+                if len(events) == 1:
+                    # Found exactly one, update it
+                    event = events[0]
+                    
+                    # Calculate new_date if "tomorrow" was mentioned
+                    from datetime import datetime, timedelta
+                    if not new_date and "zítra" in str(intent_data).lower():
+                        new_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                    
+                    update_result = await google_service.update_event(
+                        token_data=tokens,
+                        user_id=user_id,
+                        event_id=event["id"],
+                        calendar_id=event["calendar_id"],
+                        new_date=new_date,
+                        new_time=new_time
+                    )
+                    
+                    if update_result.get("success"):
+                        msg = f"✅ Událost **{event['title']}** přesunuta!"
+                        if new_date:
+                            msg += f"\n📅 Nové datum: {new_date}"
+                        if new_time:
+                            msg += f"\n⏰ Nový čas: {new_time}"
+                        
+                        async with httpx.AsyncClient() as client:
+                            await client.post(
+                                f"https://api.telegram.org/bot{token}/sendMessage",
+                                json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
+                            )
+                else:
+                    # Multiple events found, ask for clarification
+                    event_list = "\n".join([f"• {e['title']} ({e['start'][:10]})" for e in events[:5]])
+                    msg = f"🔍 Nalezeno {len(events)} událostí:\n{event_list}\n\nUpřesni prosím kterou myslíš."
+                    
+                    async with httpx.AsyncClient() as client:
+                        await client.post(
+                            f"https://api.telegram.org/bot{token}/sendMessage",
+                            json={"chat_id": chat_id, "text": msg}
+                        )
+            else:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": chat_id, "text": f"❌ Nenašel jsem událost obsahující '{target_event}'"}
+                    )
+        
+        elif intent == "DELETE_EVENT" and target_event:
+            # Search for the event
+            search_result = await google_service.search_event(
+                token_data=tokens,
+                user_id=user_id,
+                search_query=target_event
+            )
+            
+            if search_result.get("success") and search_result.get("events"):
+                events = search_result["events"]
+                
+                if len(events) == 1:
+                    event = events[0]
+                    delete_result = await google_service.delete_event(
+                        token_data=tokens,
+                        event_id=event["id"],
+                        calendar_id=event["calendar_id"]
+                    )
+                    
+                    if delete_result.get("success"):
+                        msg = f"🗑️ Událost **{delete_result['deleted_title']}** zrušena!"
+                        async with httpx.AsyncClient() as client:
+                            await client.post(
+                                f"https://api.telegram.org/bot{token}/sendMessage",
+                                json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}
+                            )
+                else:
+                    event_list = "\n".join([f"• {e['title']} ({e['start'][:10]})" for e in events[:5]])
+                    msg = f"🔍 Nalezeno {len(events)} událostí:\n{event_list}\n\nUpřesni prosím kterou zrušit."
+                    
+                    async with httpx.AsyncClient() as client:
+                        await client.post(
+                            f"https://api.telegram.org/bot{token}/sendMessage",
+                            json={"chat_id": chat_id, "text": msg}
+                        )
+            else:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": chat_id, "text": f"❌ Nenašel jsem událost obsahující '{target_event}'"}
+                    )
+        
+        # SUMMARY - combine calendar and tasks
+        elif intent == "SUMMARY":
+            # Get today's events
+            events_result = await google_service.get_events(
+                token_data=tokens,
+                user_id=user_id,
+                query_type="today"
+            )
+            
+            # Get pending tasks
+            tasks_result = await google_service.get_pending_tasks(token_data=tokens)
+            
+            msg_parts = ["📊 **Přehled dne:**\n"]
+            
+            events = events_result.get("events", [])
+            if events:
+                msg_parts.append("📅 **Události:**")
+                for e in events:
+                    time_str = e["start"].split("T")[1][:5] if "T" in e["start"] else "Celý den"
+                    msg_parts.append(f"  {e['emoji']} {time_str} - {e['title']}")
+            else:
+                msg_parts.append("📅 Žádné události na dnešek")
+            
+            tasks = tasks_result.get("tasks", [])
+            if tasks:
+                msg_parts.append("\n📋 **Úkoly:**")
+                for t in tasks[:5]:  # Max 5 tasks
+                    prefix = "⚠️" if t["is_overdue"] else "☐"
+                    msg_parts.append(f"  {prefix} {t['title']}")
+            else:
+                msg_parts.append("\n✅ Žádné nesplněné úkoly")
+            
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": chat_id, "text": "\n".join(msg_parts)[:4000], "parse_mode": "Markdown"}
+                )
+                
     except Exception as e:
         print(f"Error processing with Google: {e}")
+        import traceback
+        traceback.print_exc()
     
     return result
+
 
 
 @router.post("/webhook")

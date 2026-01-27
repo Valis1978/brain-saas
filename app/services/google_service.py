@@ -313,11 +313,304 @@ class GoogleService:
                 "success": False,
                 "error": f"Google Tasks API error: {str(e)}"
             }
-        except Exception as e:
+
+    # ==================== QUERY METHODS ====================
+    
+    async def get_events(
+        self,
+        token_data: dict,
+        user_id: str,
+        query_type: str = "today",  # today, tomorrow, week
+        specific_date: Optional[str] = None
+    ) -> dict:
+        """Get calendar events for a specified time range."""
+        try:
+            credentials = self.get_credentials_from_tokens(token_data)
+            service = build('calendar', 'v3', credentials=credentials)
+            
+            # Get calendar IDs
+            calendars = self.get_or_create_calendars(token_data, user_id)
+            
+            # Calculate date range
+            now = datetime.now()
+            if query_type == "today":
+                start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                end = now.replace(hour=23, minute=59, second=59)
+            elif query_type == "tomorrow":
+                tomorrow = now + timedelta(days=1)
+                start = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
+                end = tomorrow.replace(hour=23, minute=59, second=59)
+            elif query_type == "week":
+                start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                end = start + timedelta(days=7)
+            elif query_type == "specific" and specific_date:
+                start = datetime.strptime(specific_date, '%Y-%m-%d')
+                end = start.replace(hour=23, minute=59, second=59)
+            else:
+                start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                end = now.replace(hour=23, minute=59, second=59)
+            
+            all_events = []
+            
+            for cal_type, cal_id in calendars.items():
+                events_result = service.events().list(
+                    calendarId=cal_id,
+                    timeMin=start.isoformat() + 'Z',
+                    timeMax=end.isoformat() + 'Z',
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                for event in events_result.get('items', []):
+                    start_dt = event.get('start', {}).get('dateTime', event.get('start', {}).get('date', ''))
+                    all_events.append({
+                        'id': event.get('id'),
+                        'title': event.get('summary', 'Bez názvu'),
+                        'start': start_dt,
+                        'calendar': cal_type,
+                        'emoji': '🧠' if cal_type == 'work' else '🏠'
+                    })
+            
+            # Sort by start time
+            all_events.sort(key=lambda x: x['start'])
+            
             return {
-                "success": False,
-                "error": f"Failed to create task: {str(e)}"
+                "success": True,
+                "events": all_events,
+                "count": len(all_events),
+                "query_type": query_type
             }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e), "events": []}
+    
+    async def get_pending_tasks(self, token_data: dict) -> dict:
+        """Get all pending (uncompleted) tasks, optionally filtering overdue."""
+        try:
+            credentials = self.get_credentials_from_tokens(token_data)
+            service = build('tasks', 'v1', credentials=credentials)
+            
+            # Get default task list
+            tasklists = service.tasklists().list().execute()
+            default_tasklist = tasklists.get('items', [{}])[0].get('id', '@default')
+            
+            # Get all tasks
+            tasks_result = service.tasks().list(
+                tasklist=default_tasklist,
+                showCompleted=False
+            ).execute()
+            
+            tasks = []
+            now = datetime.now()
+            
+            for task in tasks_result.get('items', []):
+                due = task.get('due')
+                is_overdue = False
+                due_formatted = None
+                
+                if due:
+                    due_date = datetime.fromisoformat(due.replace('Z', '+00:00'))
+                    is_overdue = due_date.date() < now.date()
+                    due_formatted = due_date.strftime('%d.%m.%Y')
+                
+                tasks.append({
+                    'id': task.get('id'),
+                    'title': task.get('title', 'Bez názvu'),
+                    'due': due_formatted,
+                    'is_overdue': is_overdue,
+                    'notes': task.get('notes')
+                })
+            
+            # Overdue tasks first
+            tasks.sort(key=lambda x: (not x['is_overdue'], x.get('due') or '9999'))
+            
+            overdue_count = sum(1 for t in tasks if t['is_overdue'])
+            
+            return {
+                "success": True,
+                "tasks": tasks,
+                "count": len(tasks),
+                "overdue_count": overdue_count
+            }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e), "tasks": []}
+    
+    # ==================== SEARCH METHODS ====================
+    
+    async def search_event(
+        self,
+        token_data: dict,
+        user_id: str,
+        search_query: str
+    ) -> dict:
+        """Search for an event by name/query."""
+        try:
+            credentials = self.get_credentials_from_tokens(token_data)
+            service = build('calendar', 'v3', credentials=credentials)
+            
+            calendars = self.get_or_create_calendars(token_data, user_id)
+            
+            # Search in upcoming 30 days
+            now = datetime.now()
+            end = now + timedelta(days=30)
+            
+            matching_events = []
+            search_lower = search_query.lower()
+            
+            for cal_type, cal_id in calendars.items():
+                events_result = service.events().list(
+                    calendarId=cal_id,
+                    timeMin=now.isoformat() + 'Z',
+                    timeMax=end.isoformat() + 'Z',
+                    singleEvents=True,
+                    orderBy='startTime'
+                ).execute()
+                
+                for event in events_result.get('items', []):
+                    summary = event.get('summary', '').lower()
+                    if search_lower in summary:
+                        start_dt = event.get('start', {}).get('dateTime', event.get('start', {}).get('date', ''))
+                        matching_events.append({
+                            'id': event.get('id'),
+                            'title': event.get('summary'),
+                            'start': start_dt,
+                            'calendar_id': cal_id,
+                            'calendar_type': cal_type
+                        })
+            
+            return {
+                "success": True,
+                "events": matching_events,
+                "count": len(matching_events)
+            }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e), "events": []}
+    
+    # ==================== UPDATE/DELETE METHODS ====================
+    
+    async def update_event(
+        self,
+        token_data: dict,
+        user_id: str,
+        event_id: str,
+        calendar_id: str,
+        new_date: Optional[str] = None,
+        new_time: Optional[str] = None
+    ) -> dict:
+        """Update an existing calendar event."""
+        try:
+            credentials = self.get_credentials_from_tokens(token_data)
+            service = build('calendar', 'v3', credentials=credentials)
+            
+            # Get existing event
+            event = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+            
+            # Get current start
+            current_start = event.get('start', {})
+            is_all_day = 'date' in current_start
+            
+            if is_all_day:
+                current_date = current_start.get('date')
+                # Update date
+                if new_date:
+                    event['start']['date'] = new_date
+                    event['end']['date'] = new_date
+            else:
+                current_dt = datetime.fromisoformat(current_start.get('dateTime').replace('Z', '+00:00'))
+                
+                if new_date:
+                    new_dt = datetime.strptime(new_date, '%Y-%m-%d')
+                    current_dt = current_dt.replace(year=new_dt.year, month=new_dt.month, day=new_dt.day)
+                
+                if new_time:
+                    hour, minute = map(int, new_time.split(':'))
+                    current_dt = current_dt.replace(hour=hour, minute=minute)
+                
+                # Update start and end
+                duration = datetime.fromisoformat(event['end']['dateTime'].replace('Z', '+00:00')) - \
+                          datetime.fromisoformat(event['start']['dateTime'].replace('Z', '+00:00'))
+                
+                event['start']['dateTime'] = current_dt.isoformat()
+                event['end']['dateTime'] = (current_dt + duration).isoformat()
+            
+            updated_event = service.events().update(
+                calendarId=calendar_id,
+                eventId=event_id,
+                body=event
+            ).execute()
+            
+            return {
+                "success": True,
+                "event_id": updated_event.get('id'),
+                "title": updated_event.get('summary'),
+                "html_link": updated_event.get('htmlLink')
+            }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    async def delete_event(
+        self,
+        token_data: dict,
+        event_id: str,
+        calendar_id: str
+    ) -> dict:
+        """Delete a calendar event."""
+        try:
+            credentials = self.get_credentials_from_tokens(token_data)
+            service = build('calendar', 'v3', credentials=credentials)
+            
+            # Get event info before deleting
+            event = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+            title = event.get('summary', 'Událost')
+            start = event.get('start', {}).get('dateTime', event.get('start', {}).get('date', ''))
+            
+            service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+            
+            return {
+                "success": True,
+                "deleted_title": title,
+                "deleted_start": start
+            }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    async def complete_task(
+        self,
+        token_data: dict,
+        task_id: str
+    ) -> dict:
+        """Mark a task as completed."""
+        try:
+            credentials = self.get_credentials_from_tokens(token_data)
+            service = build('tasks', 'v1', credentials=credentials)
+            
+            # Get default task list
+            tasklists = service.tasklists().list().execute()
+            default_tasklist = tasklists.get('items', [{}])[0].get('id', '@default')
+            
+            # Update task status
+            task = service.tasks().get(tasklist=default_tasklist, task=task_id).execute()
+            task['status'] = 'completed'
+            
+            updated_task = service.tasks().update(
+                tasklist=default_tasklist,
+                task=task_id,
+                body=task
+            ).execute()
+            
+            return {
+                "success": True,
+                "task_id": updated_task.get('id'),
+                "title": updated_task.get('title'),
+                "status": "completed"
+            }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 # Singleton instance
 google_service = GoogleService()
