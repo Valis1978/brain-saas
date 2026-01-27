@@ -2,6 +2,7 @@ from openai import AsyncOpenAI
 import os
 import json
 from typing import Optional
+from datetime import datetime
 
 class AIService:
     def __init__(self):
@@ -27,18 +28,21 @@ class AIService:
         if not self.client:
             return {"error": "API key missing"}
 
-        system_prompt = """
+        # Get current date dynamically
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        
+        system_prompt = f"""
         Jsi inteligentní asistent. Analyzuj text a extrahuj z něj záměr a strukturovaná data.
         Vrať odpověď POUZE jako JSON v tomto formátu:
-        {
+        {{
             "intent": "TODO" | "EVENT" | "NOTE" | "UNKNOWN",
             "title": "Stručný název",
             "description": "Detailní popis",
             "date": "YYYY-MM-DD" | null,
             "time": "HH:MM" | null,
             "priority": "HIGH" | "MEDIUM" | "LOW"
-        }
-        Dnešní datum je 2026-01-26.
+        }}
+        Dnešní datum je {current_date}.
         """
 
         response = await self.client.chat.completions.create(
