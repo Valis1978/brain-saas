@@ -206,7 +206,7 @@ async def get_tasks(user_id: str = Query(..., description="Telegram user ID")):
         raise HTTPException(status_code=401, detail="User not authenticated with Google")
     
     try:
-        result = google_service.get_pending_tasks(tokens)
+        result = await google_service.get_pending_tasks(tokens)
         return {"tasks": result.get("tasks", []), "success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
