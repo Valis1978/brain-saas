@@ -283,7 +283,7 @@ async def complete_task(task_id: str, user_id: str = Query(..., description="Tel
         raise HTTPException(status_code=401, detail="User not authenticated with Google")
     
     try:
-        result = google_service.complete_task(tokens, task_id)
+        result = await google_service.complete_task(tokens, task_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
