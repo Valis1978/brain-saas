@@ -40,8 +40,24 @@ class AIService:
             "description": "Detailní popis",
             "date": "YYYY-MM-DD" | null,
             "time": "HH:MM" | null,
-            "priority": "HIGH" | "MEDIUM" | "LOW"
+            "priority": "HIGH" | "MEDIUM" | "LOW",
+            "category": "work" | "personal"
         }}
+        
+        PRAVIDLA PRO KATEGORII:
+        - "work" = pracovní: schůzky s klienty, projekty, deadliny, meetingy, práce, kancelář, business
+        - "personal" = soukromé: rodina, narozeniny, lékař, nákupy, sport, přátelé, volno, dovolená, domácnost
+        
+        PŘÍKLADY:
+        - "Schůzka s klientem" → work
+        - "Narozeniny tchýně" → personal  
+        - "Meeting o projektu" → work
+        - "Večeře s kamarády" → personal
+        - "Deadline na report" → work
+        - "Koupat psa" → personal
+        
+        Pokud si nejsi jistý, rozhodni podle kontextu. Většina kalendářových událostí bývá pracovních.
+        
         Dnešní datum je {current_date}.
         """
 

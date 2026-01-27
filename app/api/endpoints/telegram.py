@@ -45,6 +45,7 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
     date = intent_data.get("date")
     time = intent_data.get("time")
     description = intent_data.get("description")
+    category = intent_data.get("category")  # AI-detected category (work/personal)
     
     result = None
     
@@ -56,7 +57,8 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                 date=date,
                 time=time,
                 description=description,
-                user_id=user_id  # Pass user_id for dual calendar support
+                user_id=user_id,
+                category=category  # Pass AI-detected category
             )
             
             if result.get("success"):
