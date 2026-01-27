@@ -171,3 +171,135 @@ async def check_google_status(user_id: str = Query(..., description="Telegram us
             return {"connected": False}
     finally:
         db.close()
+
+
+# =============================================================================
+# TASKS API ENDPOINTS
+# =============================================================================
+
+def get_user_tokens(user_id: str) -> dict:
+    """Helper to get user tokens from database."""
+    db = SessionLocal()
+    try:
+        result = db.execute(
+            text("SELECT access_token, refresh_token, expires_at FROM google_tokens WHERE user_id = :user_id"),
+            {"user_id": user_id}
+        ).fetchone()
+        
+        if not result:
+            return None
+        
+        return {
+            "access_token": result.access_token,
+            "refresh_token": result.refresh_token,
+            "expires_at": result.expires_at.isoformat() if result.expires_at else None
+        }
+    finally:
+        db.close()
+
+
+@router.get("/tasks")
+async def get_tasks(user_id: str = Query(..., description="Telegram user ID")):
+    """Get all pending tasks for a user."""
+    tokens = get_user_tokens(user_id)
+    if not tokens:
+        raise HTTPException(status_code=401, detail="User not authenticated with Google")
+    
+    try:
+        result = google_service.get_pending_tasks(tokens)
+        return {"tasks": result.get("tasks", []), "success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tasks/{task_id}/complete")
+async def complete_task(task_id: str, user_id: str = Query(..., description="Telegram user ID")):
+    """Mark a task as completed."""
+    tokens = get_user_tokens(user_id)
+    if not tokens:
+        raise HTTPException(status_code=401, detail="User not authenticated with Google")
+    
+    try:
+        result = google_service.complete_task(tokens, task_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# CALENDAR API ENDPOINTS
+# =============================================================================
+
+@router.get("/events")
+async def get_events(
+    user_id: str = Query(..., description="Telegram user ID"),
+    query_type: str = Query("week", description="Query type: today, tomorrow, week")
+):
+    """Get calendar events for a user."""
+    tokens = get_user_tokens(user_id)
+    if not tokens:
+        raise HTTPException(status_code=401, detail="User not authenticated with Google")
+    
+    try:
+        result = google_service.get_events(tokens, user_id, query_type)
+        return {"events": result.get("events", []), "success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/events/{event_id}")
+async def update_event(
+    event_id: str,
+    user_id: str = Query(..., description="Telegram user ID"),
+    calendar_id: str = Query(..., description="Calendar ID"),
+    new_date: str = Query(None, description="New date (YYYY-MM-DD)"),
+    new_time: str = Query(None, description="New time (HH:MM)")
+):
+    """Update a calendar event."""
+    tokens = get_user_tokens(user_id)
+    if not tokens:
+        raise HTTPException(status_code=401, detail="User not authenticated with Google")
+    
+    try:
+        result = google_service.update_event(tokens, user_id, event_id, calendar_id, new_date, new_time)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/events/{event_id}")
+async def delete_event(
+    event_id: str,
+    user_id: str = Query(..., description="Telegram user ID"),
+    calendar_id: str = Query(..., description="Calendar ID")
+):
+    """Delete a calendar event."""
+    tokens = get_user_tokens(user_id)
+    if not tokens:
+        raise HTTPException(status_code=401, detail="User not authenticated with Google")
+    
+    try:
+        result = google_service.delete_event(tokens, event_id, calendar_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/events/{event_id}/move")
+async def move_event(
+    event_id: str,
+    user_id: str = Query(..., description="Telegram user ID"),
+    source_calendar_id: str = Query(..., description="Source calendar ID"),
+    target_calendar_type: str = Query(..., description="Target calendar type: work or personal")
+):
+    """Move an event between calendars."""
+    tokens = get_user_tokens(user_id)
+    if not tokens:
+        raise HTTPException(status_code=401, detail="User not authenticated with Google")
+    
+    try:
+        result = google_service.move_event_to_calendar(tokens, user_id, event_id, source_calendar_id, target_calendar_type)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
