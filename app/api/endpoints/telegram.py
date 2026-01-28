@@ -5,6 +5,7 @@ from app.services.ai_service import ai_service
 from app.services.google_service import google_service
 from app.db.session import SessionLocal
 from app.models.capture import Capture
+from app.utils.messages import MSG
 import httpx
 import tempfile
 import os
@@ -115,14 +116,14 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
             
             if result.get("success"):
                 emoji = result.get("calendar_emoji", "📅")
-                category_label = "Práce" if result.get("category") == "work" else "Osobní"
+                category_label = MSG.CATEGORY_WORK if result.get("category") == "work" else MSG.CATEGORY_PERSONAL
                 
                 async with httpx.AsyncClient() as client:
                     await client.post(
                         f"https://api.telegram.org/bot{token}/sendMessage",
                         json={
                             "chat_id": chat_id,
-                            "text": f"{emoji} Přidáno do kalendáře **{category_label}**!\n\n**{title}**\n🔗 {result.get('html_link', '')}"[:4000],
+                            "text": MSG.EVENT_CREATED.format(emoji=emoji, category=category_label, title=title, link=result.get('html_link', ''))[:4000],
                             "parse_mode": "Markdown"
                         }
                     )
@@ -141,7 +142,7 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                         f"https://api.telegram.org/bot{token}/sendMessage",
                         json={
                             "chat_id": chat_id,
-                            "text": f"✅ Úkol přidán do Google Tasks!\n\n**{title}**",
+                            "text": MSG.TASK_CREATED.format(title=title),
                             "parse_mode": "Markdown"
                         }
                     )
@@ -166,7 +167,7 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                             f"https://api.telegram.org/bot{token}/sendMessage",
                             json={
                                 "chat_id": chat_id,
-                                "text": f"📝 Poznámka uložena!\n\n**{title}**",
+                                "text": MSG.NOTE_SAVED.format(title=title),
                                 "parse_mode": "Markdown"
                             }
                         )
@@ -176,7 +177,7 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                             f"https://api.telegram.org/bot{token}/sendMessage",
                             json={
                                 "chat_id": chat_id,
-                                "text": f"📝 Poznámka zachycena: **{title}**\n(Nebyla synchronizována do dashboardu)",
+                                "text": MSG.NOTE_SAVED_LOCAL.format(title=title),
                                 "parse_mode": "Markdown"
                             }
                         )
@@ -187,7 +188,7 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                         f"https://api.telegram.org/bot{token}/sendMessage",
                         json={
                             "chat_id": chat_id,
-                            "text": f"📝 Poznámka zachycena: **{title}**",
+                            "text": MSG.NOTE_FALLBACK.format(title=title),
                             "parse_mode": "Markdown"
                         }
                     )
@@ -206,10 +207,10 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                 if events:
                     # Format events nicely
                     label = {
-                        "today": "📅 Dnešek",
-                        "tomorrow": "📅 Zítřek", 
-                        "week": "📅 Tento týden"
-                    }.get(query_type, "📅 Události")
+                        "today": MSG.CALENDAR_TODAY,
+                        "tomorrow": MSG.CALENDAR_TOMORROW, 
+                        "week": MSG.CALENDAR_WEEK
+                    }.get(query_type, MSG.CALENDAR_EVENTS)
                     
                     event_list = []
                     for e in events:
@@ -220,7 +221,7 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                     
                     msg = f"{label}:\n\n" + "\n".join(event_list)
                 else:
-                    msg = "📅 Nemáš žádné nadcházející události."
+                    msg = MSG.NO_EVENTS
                 
                 async with httpx.AsyncClient() as client:
                     await client.post(
@@ -242,14 +243,14 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                         due_str = f" (do {t['due']})" if t["due"] else ""
                         task_list.append(f"{prefix} **{t['title']}**{due_str}")
                     
-                    header = f"📋 Úkoly ({len(tasks)}"
+                    header = MSG.TASKS_HEADER.format(count=len(tasks))
                     if overdue > 0:
-                        header += f", ⚠️ {overdue} prošlých"
+                        header += MSG.TASKS_OVERDUE.format(count=overdue)
                     header += "):\n\n"
                     
                     msg = header + "\n".join(task_list)
                 else:
-                    msg = "✅ Nemáš žádné nesplněné úkoly!"
+                    msg = MSG.NO_TASKS
                 
                 async with httpx.AsyncClient() as client:
                     await client.post(
@@ -399,32 +400,32 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
             # Get pending tasks
             tasks_result = await google_service.get_pending_tasks(token_data=tokens)
             
-            msg_parts = ["📊 **Přehled dne:**\n"]
-            voice_parts = ["Přehled tvého dne:"]  # Clean text for TTS
+            msg_parts = [MSG.SUMMARY_HEADER]
+            voice_parts = [MSG.SUMMARY_VOICE_INTRO]  # Clean text for TTS
             
             events = events_result.get("events", [])
             if events:
-                msg_parts.append("📅 **Události:**")
-                voice_parts.append("Události:")
+                msg_parts.append(MSG.SUMMARY_EVENTS)
+                voice_parts.append(MSG.SUMMARY_VOICE_EVENTS)
                 for e in events:
-                    time_str = e["start"].split("T")[1][:5] if "T" in e["start"] else "Celý den"
+                    time_str = e["start"].split("T")[1][:5] if "T" in e["start"] else MSG.ALL_DAY
                     msg_parts.append(f"  {e['emoji']} {time_str} - {e['title']}")
                     voice_parts.append(f"{time_str} {e['title']}")
             else:
-                msg_parts.append("📅 Žádné události na dnešek")
-                voice_parts.append("Nemáš žádné události na dnešek.")
+                msg_parts.append(MSG.NO_EVENTS_TODAY)
+                voice_parts.append(MSG.SUMMARY_VOICE_NO_EVENTS)
             
             tasks = tasks_result.get("tasks", [])
             if tasks:
-                msg_parts.append("\n📋 **Úkoly:**")
-                voice_parts.append("Úkoly:")
+                msg_parts.append(MSG.SUMMARY_TASKS)
+                voice_parts.append(MSG.SUMMARY_VOICE_TASKS)
                 for t in tasks[:5]:  # Max 5 tasks
                     prefix = "⚠️" if t["is_overdue"] else "☐"
                     msg_parts.append(f"  {prefix} {t['title']}")
                     voice_parts.append(t['title'])
             else:
-                msg_parts.append("\n✅ Žádné nesplněné úkoly")
-                voice_parts.append("Nemáš žádné nesplněné úkoly.")
+                msg_parts.append(MSG.NO_TASKS_TODAY)
+                voice_parts.append(MSG.SUMMARY_VOICE_NO_TASKS)
             
             # Send text message first
             async with httpx.AsyncClient() as client:
