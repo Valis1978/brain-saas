@@ -100,6 +100,52 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
                         }
                     )
         
+        elif intent == "NOTE":
+            # Save note to Supabase via Fusion App API
+            try:
+                async with httpx.AsyncClient() as client:
+                    fusion_app_url = os.getenv("FUSION_APP_URL", "https://testapp.mujagent.cz")
+                    response = await client.post(
+                        f"{fusion_app_url}/api/brain/notes",
+                        json={
+                            "title": title,
+                            "content": description,
+                            "user_id": user_id
+                        },
+                        timeout=10.0
+                    )
+                    
+                    if response.status_code == 200:
+                        await client.post(
+                            f"https://api.telegram.org/bot{token}/sendMessage",
+                            json={
+                                "chat_id": chat_id,
+                                "text": f"📝 Poznámka uložena!\n\n**{title}**",
+                                "parse_mode": "Markdown"
+                            }
+                        )
+                    else:
+                        print(f"Failed to save note: {response.status_code} - {response.text}")
+                        await client.post(
+                            f"https://api.telegram.org/bot{token}/sendMessage",
+                            json={
+                                "chat_id": chat_id,
+                                "text": f"📝 Poznámka zachycena: **{title}**\n(Nebyla synchronizována do dashboardu)",
+                                "parse_mode": "Markdown"
+                            }
+                        )
+            except Exception as note_error:
+                print(f"Error saving note: {note_error}")
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={
+                            "chat_id": chat_id,
+                            "text": f"📝 Poznámka zachycena: **{title}**",
+                            "parse_mode": "Markdown"
+                        }
+                    )
+        
         # ==================== QUERY INTENTS ====================
         elif intent == "QUERY_CALENDAR":
             result = await google_service.get_events(
