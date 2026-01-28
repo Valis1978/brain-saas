@@ -12,13 +12,13 @@ class AIService:
             self.client = AsyncOpenAI(api_key=self.api_key)
 
     async def transcribe_voice(self, file_path: str) -> str:
-        """Transcribes an audio file using OpenAI Whisper."""
+        """Transcribes an audio file using OpenAI GPT-4o transcription."""
         if not self.client:
             return "OpenAI client not initialized."
             
         with open(file_path, "rb") as audio_file:
             transcript = await self.client.audio.transcriptions.create(
-                model="whisper-1", 
+                model="gpt-4o-mini-transcribe",  # Upgraded from whisper-1 (deprecated 2022 model)
                 file=audio_file
             )
             return transcript.text
