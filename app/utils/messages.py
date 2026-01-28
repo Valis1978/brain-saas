@@ -66,6 +66,11 @@ class Messages:
     
     # ==================== TIME LABELS ====================
     ALL_DAY = "Celý den"
+    
+    # ==================== REMINDERS ====================
+    MORNING_GREETING = "☀️ Dobré ráno! Tady je tvůj přehled dne:"
+    REMINDER_UPCOMING = "⏰ Za {minutes} minut: **{title}**"
+    REMINDER_LOCATION = "📍 {location}"
 
 
 # Singleton instance for easy import
