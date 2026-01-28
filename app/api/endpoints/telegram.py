@@ -12,6 +12,52 @@ import json
 
 router = APIRouter()
 
+# Voice response settings
+VOICE_RESPONSE_ENABLED = os.getenv("VOICE_RESPONSE_ENABLED", "true").lower() == "true"
+
+
+async def send_voice_response(chat_id: str | int, text: str, token: str):
+    """
+    Send a voice message response to Telegram.
+    Falls back to text if TTS fails.
+    """
+    if not VOICE_RESPONSE_ENABLED:
+        return False
+    
+    try:
+        # Generate audio
+        audio_bytes = await ai_service.text_to_speech(text)
+        
+        if not audio_bytes:
+            return False
+        
+        # Save to temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+            tmp.write(audio_bytes)
+            tmp_name = tmp.name
+        
+        try:
+            # Send voice message to Telegram
+            async with httpx.AsyncClient() as client:
+                with open(tmp_name, "rb") as audio_file:
+                    files = {"voice": ("response.mp3", audio_file, "audio/mpeg")}
+                    data = {"chat_id": chat_id}
+                    
+                    await client.post(
+                        f"https://api.telegram.org/bot{token}/sendVoice",
+                        data=data,
+                        files=files,
+                        timeout=30.0
+                    )
+            return True
+        finally:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
+                
+    except Exception as e:
+        print(f"Voice response error: {e}")
+        return False
+
 
 async def get_user_google_tokens(user_id: str) -> dict | None:
     """Get Google tokens for a user if they exist."""
@@ -354,30 +400,41 @@ async def process_with_google(user_id: str, intent_data: dict, token: str, chat_
             tasks_result = await google_service.get_pending_tasks(token_data=tokens)
             
             msg_parts = ["📊 **Přehled dne:**\n"]
+            voice_parts = ["Přehled tvého dne:"]  # Clean text for TTS
             
             events = events_result.get("events", [])
             if events:
                 msg_parts.append("📅 **Události:**")
+                voice_parts.append("Události:")
                 for e in events:
                     time_str = e["start"].split("T")[1][:5] if "T" in e["start"] else "Celý den"
                     msg_parts.append(f"  {e['emoji']} {time_str} - {e['title']}")
+                    voice_parts.append(f"{time_str} {e['title']}")
             else:
                 msg_parts.append("📅 Žádné události na dnešek")
+                voice_parts.append("Nemáš žádné události na dnešek.")
             
             tasks = tasks_result.get("tasks", [])
             if tasks:
                 msg_parts.append("\n📋 **Úkoly:**")
+                voice_parts.append("Úkoly:")
                 for t in tasks[:5]:  # Max 5 tasks
                     prefix = "⚠️" if t["is_overdue"] else "☐"
                     msg_parts.append(f"  {prefix} {t['title']}")
+                    voice_parts.append(t['title'])
             else:
                 msg_parts.append("\n✅ Žádné nesplněné úkoly")
+                voice_parts.append("Nemáš žádné nesplněné úkoly.")
             
+            # Send text message first
             async with httpx.AsyncClient() as client:
                 await client.post(
                     f"https://api.telegram.org/bot{token}/sendMessage",
                     json={"chat_id": chat_id, "text": "\n".join(msg_parts)[:4000], "parse_mode": "Markdown"}
                 )
+            
+            # Send voice response
+            await send_voice_response(chat_id, " ".join(voice_parts), token)
                 
     except Exception as e:
         print(f"Error processing with Google: {e}")

@@ -23,6 +23,32 @@ class AIService:
             )
             return transcript.text
 
+    async def text_to_speech(self, text: str, voice: str = "nova") -> bytes:
+        """
+        Convert text to speech using OpenAI TTS.
+        
+        Args:
+            text: Text to convert to speech (max ~4096 chars)
+            voice: Voice to use (alloy, echo, fable, onyx, nova, shimmer)
+                   nova = warm, friendly - good for Czech
+        
+        Returns:
+            Audio bytes in mp3 format
+        """
+        if not self.client:
+            return b""
+        
+        # Truncate text if too long (TTS limit is ~4096 chars)
+        text = text[:4000] if len(text) > 4000 else text
+        
+        response = await self.client.audio.speech.create(
+            model="tts-1",
+            voice=voice,
+            input=text
+        )
+        
+        return response.content
+
     async def extract_intent(self, text: str) -> dict:
         """Uses GPT-4o to extract intent and entities from text."""
         if not self.client:
