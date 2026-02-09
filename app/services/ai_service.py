@@ -81,9 +81,10 @@ class AIService:
         
         Vrať odpověď POUZE jako JSON v tomto formátu:
         {{
-            "intent": "TODO" | "EVENT" | "NOTE" | "QUERY_CALENDAR" | "QUERY_TASKS" | "UPDATE_EVENT" | "DELETE_EVENT" | "COMPLETE_TASK" | "SUMMARY" | "UNKNOWN",
+            "intent": "TODO" | "EVENT" | "NOTE" | "QUERY_CALENDAR" | "QUERY_TASKS" | "UPDATE_EVENT" | "DELETE_EVENT" | "COMPLETE_TASK" | "SUMMARY" | "CHAT" | "UNKNOWN",
             "title": "Stručný název (pro vytváření)",
             "description": "Detailní popis",
+            "response_text": "Odpověď pro uživatele (POVINNÉ pro CHAT, jinak null)",
             "date": "YYYY-MM-DD" | null,
             "time": "HH:MM" | null,
             "priority": "HIGH" | "MEDIUM" | "LOW",
@@ -105,6 +106,7 @@ class AIService:
         - DELETE_EVENT = zrušení události ("zruš schůzku", "odvolej meeting")
         - COMPLETE_TASK = označení úkolu jako hotového ("hotovo", "splněno", "úkol dokončen")
         - SUMMARY = shrnutí dne ("jaký mám dnešek?", "co mě čeká?", "přehled dne")
+        - CHAT = konverzace, pozdrav, dotaz na asistenta ("ahoj", "jak se máš?", "díky", "co umíš?")
         
         PRAVIDLA PRO QUERY_TYPE:
         - "today" = dnešní události/úkoly
@@ -126,6 +128,8 @@ class AIService:
         - "Zruš meeting s klientem" → intent: DELETE_EVENT, target_event: "meeting s klientem"
         - "Schůzka s Janíkem zítra v 10" → intent: EVENT, category: work
         - "Narozeniny tchýně v sobotu" → intent: EVENT, category: personal
+        - "Ahoj, jak se máš?" → intent: CHAT, response_text: "Ahoj! Jsem připravený ti pomoci. Co potřebuješ?"
+        - "Díky" → intent: CHAT, response_text: "Nemáš zač! Kdyby něco, jsem tu."
         
         Dnešní datum je {current_date}.
         """

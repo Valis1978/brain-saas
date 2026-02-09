@@ -478,7 +478,22 @@ async def telegram_webhook(
         text_content = message.get("text")
         logger.info(f"Received text message from {user_id}: {text_content}")
 
+        # Simple command handling (bypass AI)
+        if text_content.strip().lower() in ["/pulse", "/status", "/ping"]:
+            await send_telegram_text(
+                chat_id,
+                "✅ Python Backend: Online\n🧠 AI Service: Ready\n🚀 Fusion App: Active",
+                token, parse_mode=None
+            )
+            return {"ok": True}
+
         intent_data = await ai_service.extract_intent(text_content)
+
+        # Handle CHAT intent (conversational reply, no DB save)
+        if intent_data.get("intent") == "CHAT":
+            response_text = intent_data.get("response_text") or "🤖 Rozumím, ale nemám odpověď."
+            await send_telegram_text(chat_id, response_text, token, parse_mode=None)
+            return {"ok": True}
 
         save_capture(str(user_id), user_name, "text", text_content, intent_data)
 
