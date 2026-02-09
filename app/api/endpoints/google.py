@@ -4,6 +4,7 @@ Handles authentication flow and token management
 """
 
 import os
+from html import escape as html_escape
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
 from sqlalchemy import text
@@ -34,12 +35,13 @@ async def google_oauth_callback(
     """Handle OAuth callback from Google."""
     
     if error:
+        safe_error = html_escape(error)
         return HTMLResponse(content=f"""
         <html>
             <head><title>Brain SaaS - Chyba</title></head>
             <body style="font-family: system-ui; padding: 40px; text-align: center;">
                 <h1>❌ Autorizace selhala</h1>
-                <p>Chyba: {error}</p>
+                <p>Chyba: {safe_error}</p>
                 <p>Zkuste to prosím znovu.</p>
             </body>
         </html>
@@ -141,12 +143,13 @@ async def google_oauth_callback(
         
     except Exception as e:
         print(f"OAuth callback error: {e}")
+        safe_error = html_escape(str(e))
         return HTMLResponse(content=f"""
         <html>
             <head><title>Brain SaaS - Chyba</title></head>
             <body style="font-family: system-ui; padding: 40px; text-align: center; background: #1a1a2e; color: white;">
                 <h1>❌ Něco se pokazilo</h1>
-                <p>{str(e)}</p>
+                <p>{safe_error}</p>
             </body>
         </html>
         """, status_code=500)

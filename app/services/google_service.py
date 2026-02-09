@@ -9,11 +9,14 @@ import json
 import unicodedata
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
+from zoneinfo import ZoneInfo
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import httpx
+
+PRAGUE_TZ = ZoneInfo("Europe/Prague")
 
 
 def normalize_text(text: str) -> str:
@@ -118,26 +121,36 @@ class GoogleService:
         }
     
     def get_credentials_from_tokens(self, token_data: dict) -> Credentials:
-        """Create Credentials object from stored token data."""
+        """Create Credentials object from stored token data with proper expiry."""
+        expiry = None
+        expires_at = token_data.get('expires_at')
+        if expires_at:
+            try:
+                expiry = datetime.fromisoformat(expires_at.replace('Z', '+00:00')).replace(tzinfo=None)
+            except (ValueError, AttributeError):
+                pass
+
         return Credentials(
             token=token_data.get('access_token'),
             refresh_token=token_data.get('refresh_token'),
             token_uri='https://oauth2.googleapis.com/token',
             client_id=self.client_id,
             client_secret=self.client_secret,
-            scopes=token_data.get('scopes', SCOPES)
+            scopes=token_data.get('scopes', SCOPES),
+            expiry=expiry
         )
     
     def detect_event_category(self, text: str) -> str:
         """
         Detect whether event is work or personal based on text content.
+        Uses diacritics-free matching so "schuzka" matches "schůzka".
         Returns 'work' or 'personal'.
         """
-        text_lower = text.lower()
-        
-        work_score = sum(1 for keyword in WORK_KEYWORDS if keyword in text_lower)
-        personal_score = sum(1 for keyword in PERSONAL_KEYWORDS if keyword in text_lower)
-        
+        text_normalized = normalize_text(text)
+
+        work_score = sum(1 for keyword in WORK_KEYWORDS if normalize_text(keyword) in text_normalized)
+        personal_score = sum(1 for keyword in PERSONAL_KEYWORDS if normalize_text(keyword) in text_normalized)
+
         # Default to work if unclear (most calendar events are work-related)
         if personal_score > work_score:
             return "personal"
@@ -247,15 +260,16 @@ class GoogleService:
                     },
                 }
             else:
-                # All-day event
+                # All-day event - Google API uses exclusive end date
+                end_date = (event_date + timedelta(days=1)).strftime('%Y-%m-%d')
                 event = {
                     'summary': title,
-                    'description': description or f'Vytvořeno z Brain SaaS',
+                    'description': description or 'Vytvořeno z Brain SaaS',
                     'start': {
                         'date': date,
                     },
                     'end': {
-                        'date': date,
+                        'date': end_date,
                     },
                 }
             
@@ -307,8 +321,9 @@ class GoogleService:
             
             # Get default task list
             tasklists = service.tasklists().list().execute()
-            default_tasklist = tasklists.get('items', [{}])[0].get('id', '@default')
-            
+            items = tasklists.get('items', [])
+            default_tasklist = items[0].get('id', '@default') if items else '@default'
+
             created_task = service.tasks().insert(tasklist=default_tasklist, body=task).execute()
             
             return {
@@ -341,8 +356,8 @@ class GoogleService:
             # Get calendar IDs
             calendars = self.get_or_create_calendars(token_data, user_id)
             
-            # Calculate date range
-            now = datetime.now()
+            # Calculate date range using proper timezone
+            now = datetime.now(PRAGUE_TZ)
             if query_type == "today":
                 start = now.replace(hour=0, minute=0, second=0, microsecond=0)
                 end = now.replace(hour=23, minute=59, second=59)
@@ -354,19 +369,19 @@ class GoogleService:
                 start = now.replace(hour=0, minute=0, second=0, microsecond=0)
                 end = start + timedelta(days=7)
             elif query_type == "specific" and specific_date:
-                start = datetime.strptime(specific_date, '%Y-%m-%d')
+                start = datetime.strptime(specific_date, '%Y-%m-%d').replace(tzinfo=PRAGUE_TZ)
                 end = start.replace(hour=23, minute=59, second=59)
             else:
                 start = now.replace(hour=0, minute=0, second=0, microsecond=0)
                 end = now.replace(hour=23, minute=59, second=59)
-            
+
             all_events = []
-            
+
             for cal_type, cal_id in calendars.items():
                 events_result = service.events().list(
                     calendarId=cal_id,
-                    timeMin=start.isoformat() + 'Z',
-                    timeMax=end.isoformat() + 'Z',
+                    timeMin=start.isoformat(),
+                    timeMax=end.isoformat(),
                     singleEvents=True,
                     orderBy='startTime'
                 ).execute()
@@ -402,8 +417,9 @@ class GoogleService:
             
             # Get default task list
             tasklists = service.tasklists().list().execute()
-            default_tasklist = tasklists.get('items', [{}])[0].get('id', '@default')
-            
+            items = tasklists.get('items', [])
+            default_tasklist = items[0].get('id', '@default') if items else '@default'
+
             # Get all tasks
             tasks_result = service.tasks().list(
                 tasklist=default_tasklist,
@@ -462,17 +478,17 @@ class GoogleService:
             calendars = self.get_or_create_calendars(token_data, user_id)
             
             # Search in upcoming 30 days
-            now = datetime.now()
+            now = datetime.now(PRAGUE_TZ)
             end = now + timedelta(days=30)
-            
+
             matching_events = []
             search_normalized = normalize_text(search_query)
-            
+
             for cal_type, cal_id in calendars.items():
                 events_result = service.events().list(
                     calendarId=cal_id,
-                    timeMin=now.isoformat() + 'Z',
-                    timeMax=end.isoformat() + 'Z',
+                    timeMin=now.isoformat(),
+                    timeMax=end.isoformat(),
                     singleEvents=True,
                     orderBy='startTime'
                 ).execute()
@@ -602,8 +618,9 @@ class GoogleService:
             
             # Get default task list
             tasklists = service.tasklists().list().execute()
-            default_tasklist = tasklists.get('items', [{}])[0].get('id', '@default')
-            
+            items = tasklists.get('items', [])
+            default_tasklist = items[0].get('id', '@default') if items else '@default'
+
             # Update task status
             task = service.tasks().get(tasklist=default_tasklist, task=task_id).execute()
             task['status'] = 'completed'
