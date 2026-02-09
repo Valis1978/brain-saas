@@ -105,7 +105,7 @@ class NotificationService:
     @staticmethod
     async def _send_user_morning_summary(user: dict):
         """Build and send morning summary for one user."""
-        from app.api.endpoints.telegram import build_summary
+        from app.utils.summary import build_summary
 
         tokens = {
             "access_token": user["access_token"],
